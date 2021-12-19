@@ -1,0 +1,67 @@
+image: docker:latest
+
+variables:
+  IMAGE_TAG: gilesfa/giles_mydjango:latest
+  HOST_IP: 192.168.0.11
+
+stages:
+  - build
+  - run
+  - test
+  - end
+  - deploy
+
+docker-build:
+  stage: build
+  tags:
+    - lab-runner1-build
+  script:
+    - echo $DOCKERHUB_PWD | docker login -u $DOCKERHUB_USER --password-stdin
+    - docker build -t  $IMAGE_TAG .
+    - docker push $IMAGE_TAG
+
+docker-run:
+  stage: run
+  tags:
+    - lab-runner1-build
+  script:
+    - ls
+    - docker run -d --rm --name mydjango -p 8000:8000 $IMAGE_TAG
+    - docker ps
+
+web-test:
+  stage: test
+  tags:
+    - lab-runner2-test
+  image: centos:centos7
+  script:
+    - date
+    - echo $HOST_IP
+    - curl http://$HOST_IP:8000/welcome
+
+docker-delete:
+  stage: end
+  tags:
+    - lab-runner1-build
+  script:
+    - docker stop mydjango
+
+service-deploy:
+  stage: deploy
+  tags:
+    - lab-runner3-deploy
+  image: ubuntu:18.04
+  before_script:
+    - echo "$SSH_PRIVATE_KEY"
+    - ls
+    - date
+    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    - mkdir -p ~/.ssh
+    - eval $(ssh-agent -s)
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+    - ssh-add <(echo "$SSH_PRIVATE_KEY")
+  script:
+    - ssh -o StrictHostKeyChecking=no deployer@$DEPLOY_SERVER "bash -s" < ./deploy.sh
+  environment:
+    name: production
+    url: http://$DEPLOY_SERVER
